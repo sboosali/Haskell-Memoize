@@ -15,3 +15,4 @@ extra-deps:
 - uglymemo-0.1.0.1 
 - stable-memo-0.3.1 
 - data-memocombinators-0.5.1 
+- StateVar-1.1.0.4

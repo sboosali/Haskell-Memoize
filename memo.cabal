@@ -76,11 +76,11 @@ library
                  Memoize.Core
                  Memoize.Example
 
-                 -- Memoize.Trie
+                 Memoize.Table 
                  Memoize.Map
                  -- Memoize.HashMap
+                 -- Memoize.Trie
                  -- Memoize.StableName 
-                 -- Memoize.
 
  other-modules:
 
@@ -92,13 +92,17 @@ library
  build-depends:
                base >=4.7 && <5
 
--- mine 
+-- my libraries 
              , spiros
 --              , enumerate 
 
+-- memorization libraries 
              , uglymemo
 --             , stable-memo
              , data-memocombinators
+             , StateVar
+             , MemoTrie
+
 
 -- (extended) standard library 
              , deepseq
@@ -109,6 +113,7 @@ library
              , bytestring
              , transformers
              , mtl
+             , stm
 
 -- ekmett 
              , exceptions
@@ -116,7 +121,7 @@ library
 
 -- other packages 
 
-             , MemoTrie
+             , dejafu 
 
 
 executable example-memo
