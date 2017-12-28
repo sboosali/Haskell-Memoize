@@ -1,0 +1,17 @@
+resolver: lts-10.0
+
+packages:
+- ./
+
+- location:
+    git:    https://github.com/sboosali/spiros
+    commit: 0c5f3584e73ae3e4c00b0a142d2024c241ac3032
+  extra-dep: true
+  subdirs: [.] 
+
+extra-deps: 
+# - spiros-0.0.0
+
+- uglymemo-0.1.0.1 
+- stable-memo-0.3.1 
+- data-memocombinators-0.5.1 
