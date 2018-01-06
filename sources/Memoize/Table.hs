@@ -1,4 +1,4 @@
--- {-# LANGUAGE RankNTypes, ExistentialQuantification #-}
+{-# LANGUAGE RankNTypes, NoMonomorphismRestriction, ExistentialQuantification #-}
 {-# LANGUAGE NamedFieldPuns, RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables, BangPatterns #-}
 
@@ -8,6 +8,12 @@
 module Memoize.Table where
 
 -- import "StateVar" Data.StateVar
+
+import qualified "concurrency" Control.Concurrent.Classy as Dejafu  
+import           "concurrency" Control.Concurrent.Classy (MonadConc)  
+
+import qualified "unordered-containers" Data.HashMap.Strict as HashMap
+import           "unordered-containers" Data.HashMap.Strict (HashMap) 
 
 import qualified "containers" Data.Map as Map
 import           "containers" Data.Map        (Map)
@@ -24,43 +30,39 @@ import           "base" Control.Concurrent.MVar (MVar)
 import qualified "base" Data.IORef as IORef
 import           "base" Data.IORef (IORef)
 
+import qualified "base" Data.STRef as STRef
+import "base" Data.STRef (STRef) 
+import           "base" Control.Monad.ST (ST, runST)
+
+import qualified "stm" Control.Concurrent.STM as TVar
+import           "stm" Control.Concurrent.STM (STM, TVar)
+
 import "base" System.IO.Unsafe (unsafePerformIO)
 import "base" Control.Arrow
 
--- import "stm" Control.Concurrent.STM (STM)
--- import "stm" Control.Concurrent.STM.TVar (TVar,
---                                     newTVar,
---                                     readTVar,
---                                     writeTVar)
-
-
--- import Control.Concurrent.STM (STM)
--- import Control.Concurrent.STM.TVar (TVar,
---                                     newTVar,
---                                     readTVar,
---                                     writeTVar)
-
--- import Control.Monad.ST (ST)
--- import Data.IORef (IORef,
---                    atomicModifyIORef',
---                    modifyIORef',
---                    atomicModifyIORef,
---                    modifyIORef,
---                    newIORef,
---                    readIORef,
---                    writeIORef)
--- import Data.STRef (STRef,
---                    modifySTRef',
---                    modifySTRef,
---                    newSTRef,
---                    readSTRef,
---                    writeSTRef)
 
 import "spiros" Prelude.Spiros
 
 --------------------------------------------------------------------------------
 
+{-|
+
+-}
+newtype Memoizer m a = Memoizer { getMemoizer ::
+  forall x. (a -> x) -> Memoized m a x 
+  }
+
+{-| @Memoized m a b@ is a function @a -> b@ 
+memoized in the context of some @Monad m@,
+which stores the memo table and updates it. 
+
+-}
+type Memoized m a b = m (a -> m b)
+                       
 {-| a mapping @t@ between @a@ and @b@  
+
+'emptyTable' can be nonempty,
+if you want to initialize it with something.
 
 -}
 data Table t a b = Table
@@ -163,6 +165,17 @@ tableIntMap = Table{..}
 --   -- boolean2maybe True  = Just ()
 --   -- maybe2boolean = maybe False (const True)  
 
+type TableHashMap a b = Table (HashMap a b) a b
+
+tableHashMap :: (Eq a, Hashable a) => TableHashMap a b
+-- tableHashMap :: forall a b. (Ord a) => Table (HashMap a b) a b
+tableHashMap = Table{..}
+  where
+  emptyTable = HashMap.empty     
+  readTable  = flip HashMap.lookup 
+  writeTable = HashMap.insert      
+
+
 --------------------------------------------------------------------------------
 
 {-| 
@@ -186,7 +199,7 @@ referenceAtomicIORef = Reference{..}
   newReference    = IORef.newIORef  
   readReference   = IORef.readIORef 
   writeReference  = IORef.atomicWriteIORef
-  modifyReference r f = IORef.atomicModifyIORef' r (f &&& const ())
+  modifyReference r f = IORef.atomicModifyIORef r (f &&& const ())
 
 {-| 
 
@@ -197,7 +210,29 @@ referenceIORef = Reference{..}
   newReference    = IORef.newIORef  
   readReference   = IORef.readIORef 
   writeReference  = IORef.writeIORef
-  modifyReference = IORef.modifyIORef' 
+  modifyReference = IORef.modifyIORef
+
+{-| 
+
+-}
+referenceSTRef :: Reference (STRef s) (ST s) a 
+referenceSTRef = Reference{..} 
+  where 
+  newReference    = STRef.newSTRef  
+  readReference   = STRef.readSTRef 
+  writeReference  = STRef.writeSTRef
+  modifyReference = STRef.modifySTRef
+
+{-| 
+
+-}
+referenceTVar :: Reference TVar STM a 
+referenceTVar = Reference{..} 
+  where 
+  newReference    = TVar.newTVar  
+  readReference   = TVar.readTVar 
+  writeReference  = TVar.writeTVar
+  modifyReference = TVar.modifyTVar
 
 -- -XExistentialQuantification
 
@@ -212,22 +247,14 @@ referenceIORef = Reference{..}
 --  , writeReference  :: reference -> a -> m ()
 --  }
 
-{- TODO déjà fu
-
-import "dejafu" Control.Concurrent.Classy as Dejafu  
-
-myFunction :: MonadConc m => m String
-
-referenceClassyMVar :: MonadConc m => Reference MVar m a 
+-- déjà fu
+referenceClassyMVar :: MonadConc m => Reference (Dejafu.MVar m) m a 
 referenceClassyMVar = Reference{..} 
   where 
   newReference    = Dejafu.newMVar  
   readReference   = Dejafu.takeMVar 
   writeReference  = Dejafu.putMVar 
   modifyReference r f = Dejafu.modifyMVar_ r (f >>> return) 
-
--}
-
 
 --------------------------------------------------------------------------------
 
@@ -260,11 +287,152 @@ and thus should be thread-safe.
 
 -}
 memoWithMapInIO :: (Ord a) => (a -> b) -> IO (a -> IO b)
-memoWithMapInIO = memoWithM tableMap referenceAtomicIORef -- TODO referenceMVar causes "blocked indefinitely" exception
+-- memoWithMapInIO = memo_WithMap_ViaMVar
+memoWithMapInIO = memo_WithMap_ViaAtomicIORef 
+-- TODO referenceMVar causes "blocked indefinitely" exception
 -- referenceMVar "blocked indefinitely" / referenceAtomicIORef worked / referenceIORef worked 
 {-# INLINE memoWithMapInIO #-}
 
+{-| memoize the function @f@ on the domain @xs@
+
+@memoMapST f xs@ 
+
+via 'ST'. the function is memoized only for the given domain.
+so distinct calls have distinct tables. 
+
+i.e. two calls
+
+@
+memoMapST f xs
+memoMapST f xs
+@ 
+
+won't share anything, the computations will be "duplicated". 
+
+-}
+memoOn_MapST :: (Traversable t, Ord a) => (a -> b) -> t a -> t b
+memoOn_MapST f xs = runST $ do
+  g <- memo_WithMap_ViaSTRef f
+  traverse g xs 
+  -- memo_WithMap_ViaSTRef :: (a -> b) -> ST s (a -> ST s b)
+  -- g :: (a -> ST s b)
+  -- traverse g :: t a -> ST s (t b)
+{-# INLINE memoOn_MapST #-}
+
 --------------------------------------------------------------------------------
+
+{-| purifies the impure memoizer, whose impurity is referentially transparent . 
+
+-}
+memoFromIO  
+  :: Memoizer IO a 
+  -> (a -> b)  
+  -> (a -> b)
+memoFromIO (Memoizer memoize) f = h
+  where
+  g = unsafePerformIO (memoize f)
+  h x = unsafePerformIO (g x)
+{-# INLINE memoFromIO #-}
+
+memoViaMVar = memoFromIO (Memoizer memo_WithMap_ViaMVar) 
+
+memoViaIORef = memoFromIO (Memoizer memo_WithMap_ViaAtomicIORef)
+
+--------------------------------------------------------------------------------
+
+memo_WithMap_ViaMVar :: (Ord a) => (a -> b) -> IO (a -> IO b)
+memo_WithMap_ViaMVar = memoWithM tableMap referenceMVar
+{-# INLINE memo_WithMap_ViaMVar #-}
+
+memo_WithMap_ViaAtomicIORef :: (Ord a) => (a -> b) -> IO (a -> IO b)
+memo_WithMap_ViaAtomicIORef = memoWithM tableMap referenceAtomicIORef 
+{-# INLINE memo_WithMap_ViaAtomicIORef #-}
+
+memo_WithMap_ViaTVar :: (Ord a) => (a -> b) -> STM (a -> STM b)
+memo_WithMap_ViaTVar = memoWithM tableMap referenceTVar
+{-# INLINE memo_WithMap_ViaTVar #-}
+
+memo_WithMap_ViaSTRef :: (Ord a) => (a -> b) -> ST s (a -> ST s b)
+memo_WithMap_ViaSTRef = memoWithM tableMap referenceSTRef
+{-# INLINE memo_WithMap_ViaSTRef #-}
+
+memo_WithMap_ViaDejafu
+  :: (MonadConc m, Ord a) => (a -> b) -> m (a -> m b)
+memo_WithMap_ViaDejafu = memoWithM tableMap referenceClassyMVar
+{-# INLINE memo_WithMap_ViaDejafu #-}
+
+--------------------------------------------------------------------------------
+
+memo_WithHashMap_ViaMVar :: (Eq a, Hashable a) => (a -> b) -> IO (a -> IO b)
+memo_WithHashMap_ViaMVar = memoWithM tableHashMap referenceMVar
+{-# INLINE memo_WithHashMap_ViaMVar #-}
+
+memo_WithHashMap_ViaAtomicIORef :: (Eq a, Hashable a) => (a -> b) -> IO (a -> IO b)
+memo_WithHashMap_ViaAtomicIORef = memoWithM tableHashMap referenceAtomicIORef 
+{-# INLINE memo_WithHashMap_ViaAtomicIORef #-}
+
+memo_WithHashMap_ViaTVar :: (Eq a, Hashable a) => (a -> b) -> STM (a -> STM b)
+memo_WithHashMap_ViaTVar = memoWithM tableHashMap referenceTVar
+{-# INLINE memo_WithHashMap_ViaTVar #-}
+
+memo_WithHashMap_ViaSTRef :: (Eq a, Hashable a) => (a -> b) -> ST s (a -> ST s b)
+memo_WithHashMap_ViaSTRef = memoWithM tableHashMap referenceSTRef
+{-# INLINE memo_WithHashMap_ViaSTRef #-}
+
+memo_WithHashMap_ViaDejafu
+  :: (MonadConc m, Eq a, Hashable a) => (a -> b) -> m (a -> m b)
+memo_WithHashMap_ViaDejafu = memoWithM tableHashMap referenceClassyMVar
+{-# INLINE memo_WithHashMap_ViaDejafu #-}
+
+--------------------------------------------------------------------------------
+
+{-|
+
+assuming @extract@ and @memoize@ are "proper",
+e.g. that @extract@ is safe or that @memoize@ preserves the function,
+then:
+
+@
+fmapMemo extract memoize f xs
+=== 
+fmap                     f xs 
+@ 
+
+-}
+fmapMemo 
+  :: (Monad m, Traversable t, Ord a)
+  => (forall x. m x -> x)
+  -> Memoizer m a
+  -> (a -> b)
+  -> t a
+  -> t b
+fmapMemo extract u f xs = extract $ memoOn u f xs
+
+{-| memo the function only on a given domain.
+
+@
+-- memoize the function @f@ on the domain @xs@ with the memoizer @u@
+memoOn u f xs
+@
+
+same shape as 'memoWithM'
+
+-}
+memoOn
+  :: (Monad m, Traversable t, Ord a)
+  => Memoizer m a
+  -> (a -> b)
+ --  -> (a -> m b)
+  -> t a
+  -> m (t b)
+memoOn (Memoizer memoize) f xs = do
+  g <- memoize f
+  -- 
+  traverse g xs
+  -- memo_WithMap_ViaSTRef :: (a -> b) -> ST s (a -> ST s b)
+  -- g :: (a -> ST s b)
+  -- traverse g :: t a -> ST s (t b)
+{-# INLINE memoOn #-}
 
 memoWithM
   :: forall t r m a b. (Monad m) 
@@ -272,7 +440,7 @@ memoWithM
   -> Reference r m t
   -> (a -> b)
   -> m (a -> m b)
-memoWithM Table{..} Reference{..} = \f -> do    -- the INLINE pragmatic uses the "lexical left-hand side" 
+memoWithM Table{..} Reference{..} = \f -> do    -- the INLINE pragma uses the "lexical left-hand side" 
     r <- newReference emptyTable      -- we close over the table, and thus it's 
                                       -- shared by all calls to the `h` closure 
     let g = cached r f
@@ -285,12 +453,15 @@ memoWithM Table{..} Reference{..} = \f -> do    -- the INLINE pragmatic uses the
     let y' = readTable table x 
     case y' of
       -- do nothing if already computed 
-      Just y  -> return y
+      Just y  -> do
+        writeReference reference table -- put it back, e.g. for MVar 
+        return y
       -- otherwise compute, then insert 
       Nothing -> do
         let y = f x
-        -- compute once 
-        reference `modifyReference` (writeTable x y)
+        -- compute once
+        writeReference reference $ writeTable x y table 
+        -- reference `modifyReference` (writeTable x y)
         return y
 
 {-# INLINEABLE memoWithM #-}

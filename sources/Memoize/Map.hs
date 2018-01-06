@@ -14,9 +14,9 @@ f = Map.memo f'
 module Memoize.Map(memoIO, memo) where
 import Memoize.Table
 
-import Control.Concurrent.MVar
-import qualified Data.Map as M
-import Data.Map (Map)
+-- import Control.Concurrent.MVar
+-- import qualified Data.Map as M
+-- import Data.Map (Map)
 
 --------------------------------------------------------------------------------
 
