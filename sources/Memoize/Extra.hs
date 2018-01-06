@@ -1,8 +1,8 @@
 {-# LANGUAGE NoImplicitPrelude #-}
-module Memoize.Extra
- ( module Memoize.Extra
- , module Prelude.Spiros
- ) where
+module Memoize.Extra where
+--  ( module Memoize.Extra
+--  , module Prelude.Spiros
+--  ) where
 
-import Prelude.Spiros
+-- import Prelude.Spiros
 

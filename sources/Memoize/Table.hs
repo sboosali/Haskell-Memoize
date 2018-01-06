@@ -7,6 +7,8 @@
 -}
 module Memoize.Table where
 
+import Memoize.Types
+
 -- import "StateVar" Data.StateVar
 
 import qualified "concurrency" Control.Concurrent.Classy as Dejafu  
@@ -40,103 +42,15 @@ import           "stm" Control.Concurrent.STM (STM, TVar)
 import "base" System.IO.Unsafe (unsafePerformIO)
 import "base" Control.Arrow
 
-
 import "spiros" Prelude.Spiros
 
---------------------------------------------------------------------------------
-
-{-|
-
--}
-newtype Memoizer m a = Memoizer { getMemoizer ::
-  forall x. (a -> x) -> Memoized m a x 
-  }
-
-{-| @Memoized m a b@ is a function @a -> b@ 
-memoized in the context of some @Monad m@,
-which stores the memo table and updates it. 
-
--}
-type Memoized m a b = m (a -> m b)
-                       
-{-| a mapping @t@ between @a@ and @b@  
-
-'emptyTable' can be nonempty,
-if you want to initialize it with something.
-
--}
-data Table t a b = Table
- { emptyTable :: !t 
- , readTable  :: !(t -> a -> Maybe b)
- , writeTable :: !(a -> b -> t -> t)
- } 
-
-{-| a reference @r@ holding @a@s within a monad @m@ 
-
--}
-data Reference r m a = Reference
- { newReference    :: !(a -> m (r a))
- , readReference   :: !(r a -> m a)
- , writeReference  :: !(r a -> a        -> m ())
- , modifyReference :: !(r a -> (a -> a) -> m ())
- }
-
-
-{-
-
-
-data Table t a b = Table
- { emptyTable :: t 
- , readTable  :: t -> a -> Maybe b
- , writeTable :: a -> b -> t -> t  
- } 
-
-data Reference r m a = Reference
- { newReference    :: a -> m (r a) 
- , readReference   :: r a -> m a
- , writeReference  :: r a -> a -> m ()
- , modifyReference :: r a -> (a -> a) -> m () 
- }
-
-
-data Table t a b = Table
- { emptyTable :: !t 
- , readTable  :: !(t -> a -> Maybe b)
- , writeTable :: !(a -> b -> t -> t)
- } 
-
-data Reference r m a = Reference
- { newReference    :: !(a -> m (r a))
- , readReference   :: !(r a -> m a)
- , writeReference  :: !(r a -> a -> m ())
- , modifyReference :: !(r a -> (a -> a) -> m ())
- }
-
--}
-
-
-{-
-
-table :: Table (t) a b 
-table = Table{..}
-  where
-  emptyTable = 
-  readTable  = 
-  writeTable =
-
-reference :: Reference r m a 
-reference = Reference{..} 
-  where 
-  newReference    =  -- :: a -> m (r a) 
-  readReference   =  -- :: r a -> m a
-  writeReference  =  -- :: r a -> a -> m ()
-  modifyReference =  -- :: r a -> (a -> a) -> m ()
-
--}
-
---------------------------------------------------------------------------------
+----------------------------------------
 
 type TableMap a b = Table (Map a b) a b
+
+type TableIntMap b = Table (IntMap b) Int b
+
+----------------------------------------
 
 tableMap :: (Ord a) => TableMap a b
 -- tableMap :: forall a b. (Ord a) => Table (Map a b) a b
@@ -145,8 +59,6 @@ tableMap = Table{..}
   emptyTable = Map.empty       -- :: Map a b
   readTable  = flip Map.lookup -- :: Map a b -> a -> Maybe b 
   writeTable = Map.insert      -- :: a -> b -> Map a b -> Map a b
-
-type TableIntMap b = Table (IntMap b) Int b
 
 tableIntMap :: Table (IntMap b) Int b
 tableIntMap = Table{..}
@@ -176,7 +88,7 @@ tableHashMap = Table{..}
   writeTable = HashMap.insert      
 
 
---------------------------------------------------------------------------------
+----------------------------------------
 
 {-| 
 
@@ -256,7 +168,7 @@ referenceClassyMVar = Reference{..}
   writeReference  = Dejafu.putMVar 
   modifyReference r f = Dejafu.modifyMVar_ r (f >>> return) 
 
---------------------------------------------------------------------------------
+----------------------------------------
 
 {-|
 
@@ -319,7 +231,7 @@ memoOn_MapST f xs = runST $ do
   -- traverse g :: t a -> ST s (t b)
 {-# INLINE memoOn_MapST #-}
 
---------------------------------------------------------------------------------
+----------------------------------------
 
 {-| purifies the impure memoizer, whose impurity is referentially transparent . 
 
@@ -334,11 +246,13 @@ memoFromIO (Memoizer memoize) f = h
   h x = unsafePerformIO (g x)
 {-# INLINE memoFromIO #-}
 
+memoViaMVar :: Ord a => (a -> b) -> a -> b
 memoViaMVar = memoFromIO (Memoizer memo_WithMap_ViaMVar) 
 
+memoViaIORef :: Ord a => (a -> b) -> a -> b
 memoViaIORef = memoFromIO (Memoizer memo_WithMap_ViaAtomicIORef)
 
---------------------------------------------------------------------------------
+----------------------------------------
 
 memo_WithMap_ViaMVar :: (Ord a) => (a -> b) -> IO (a -> IO b)
 memo_WithMap_ViaMVar = memoWithM tableMap referenceMVar
@@ -361,7 +275,7 @@ memo_WithMap_ViaDejafu
 memo_WithMap_ViaDejafu = memoWithM tableMap referenceClassyMVar
 {-# INLINE memo_WithMap_ViaDejafu #-}
 
---------------------------------------------------------------------------------
+----------------------------------------
 
 memo_WithHashMap_ViaMVar :: (Eq a, Hashable a) => (a -> b) -> IO (a -> IO b)
 memo_WithHashMap_ViaMVar = memoWithM tableHashMap referenceMVar
@@ -384,7 +298,7 @@ memo_WithHashMap_ViaDejafu
 memo_WithHashMap_ViaDejafu = memoWithM tableHashMap referenceClassyMVar
 {-# INLINE memo_WithHashMap_ViaDejafu #-}
 
---------------------------------------------------------------------------------
+----------------------------------------
 
 {-|
 
@@ -468,7 +382,7 @@ memoWithM Table{..} Reference{..} = \f -> do    -- the INLINE pragma uses the "l
 -- {-# SPECIALIZE memoWithM :: #-}
 -- {-# SPECIALIZE memoWithM :: #-}
 
--- --------------------------------------------------------------------------------
+-- ----------------------------------------
 
 -- {-|
 

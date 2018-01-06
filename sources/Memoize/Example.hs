@@ -4,6 +4,7 @@ module Memoize.Example where
 -- import Memoize
 import qualified Memoize.Map as MapMemo
 import qualified Memoize.Table as Memo  
+import Memoize.Types as Memo  
 
 import "base" System.Environment
 
