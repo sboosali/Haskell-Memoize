@@ -222,14 +222,17 @@ memoMapST f xs
 won't share anything, the computations will be "duplicated". 
 
 -}
-memoOn_MapST :: (Traversable t, Ord a) => (a -> b) -> t a -> t b
-memoOn_MapST f xs = runST $ do
-  g <- memo_WithMap_ViaSTRef f
-  traverse g xs 
+memoSTMap :: (Traversable t, Ord a) => (a -> b) -> t a -> t b
+memoSTMap f xs = runST $ do
+  memoOn (Memoizer memo_WithMap_ViaSTRef) f xs
+
+  -- fmapMemo runST (Memoizer memo_WithMap_ViaSTRef)
+  --
+  -- where
   -- memo_WithMap_ViaSTRef :: (a -> b) -> ST s (a -> ST s b)
   -- g :: (a -> ST s b)
   -- traverse g :: t a -> ST s (t b)
-{-# INLINE memoOn_MapST #-}
+{-# INLINE memoSTMap #-}
 
 ----------------------------------------
 
@@ -348,10 +351,21 @@ memoOn (Memoizer memoize) f xs = do
   -- traverse g :: t a -> ST s (t b)
 {-# INLINE memoOn #-}
 
+{-|
+
+When contested, for 'References' like 'MVar':
+
+* there won't be corruption, 
+if the 'Table' is immutable, and the function is pure.
+* there should be no deadlock, 
+but the thread that runs second will block 
+until the thread that ran first finishes.
+
+-}
 memoWithM
   :: forall t r m a b. (Monad m) 
   => (Table t) a b
-  -> Reference r m t
+  -> (Reference r) m t
   -> (a -> b)
   -> m (a -> m b)
 memoWithM Table{..} Reference{..} = \f -> do    -- the INLINE pragma uses the "lexical left-hand side" 
@@ -377,6 +391,11 @@ memoWithM Table{..} Reference{..} = \f -> do    -- the INLINE pragma uses the "l
         writeReference reference $ writeTable x y table 
         -- reference `modifyReference` (writeTable x y)
         return y
+
+-- (before)
+-- in a race condition, there's no deadlock or corruption, 
+-- but the one that finishes last will update the cache, while
+-- the one that finishes first won't affect the cache.  
 
 {-# INLINEABLE memoWithM #-}
 -- {-# SPECIALIZE memoWithM :: #-}

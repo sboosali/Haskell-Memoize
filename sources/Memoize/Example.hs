@@ -57,7 +57,7 @@ mainWith s = do
  print $ fmap increment inputs == fmap increment_memo inputs
 
  putStrLn "\n[memo ST]"
- print $ outputs == Memo.memoOn_MapST increment inputs 
+ print $ outputs == Memo.memoSTMap increment inputs 
 
  putStrLn "\n[dejafu]"
  print =<< Dejafu.autocheck (increments_Dejafu inputs)
