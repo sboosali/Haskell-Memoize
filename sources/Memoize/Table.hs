@@ -33,7 +33,7 @@ import qualified "base" Data.IORef as IORef
 import           "base" Data.IORef (IORef)
 
 import qualified "base" Data.STRef as STRef
-import "base" Data.STRef (STRef) 
+import           "base" Data.STRef (STRef) 
 import           "base" Control.Monad.ST (ST, runST)
 
 import qualified "stm" Control.Concurrent.STM as TVar
@@ -184,6 +184,21 @@ memoWithMap f = h
   g = unsafePerformIO (memoWithMapInIO f)
   h x = unsafePerformIO (g x)
 {-# INLINE memoWithMap #-}
+
+{-|
+
+like 'memoWithMap', but using a 'HashMap'.
+
+-}
+memoWithHashMap
+  :: (Eq a, Hashable a)
+  => (a -> b)           -- ^ Function to memoize
+  -> (a -> b)
+memoWithHashMap f = h
+  where
+  g = unsafePerformIO (memo_WithHashMap_ViaAtomicIORef f)
+  h x = unsafePerformIO (g x)
+{-# INLINE memoWithHashMap #-}
 
 {-|
 

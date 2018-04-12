@@ -12,6 +12,11 @@ import qualified "dejafu" Test.DejaFu as Dejafu
 -- import qualified "concurrency" Control.Concurrent.Classy as 
 import           "concurrency" Control.Concurrent.Classy (MonadConc)
 
+import System.Console.GetOpt
+--import Data.Maybe ( fromMaybe )
+
+----------------------------------------
+
 {-|
 @
 stack build && stack exec -- example-memo
@@ -19,10 +24,51 @@ stack build && stack exec -- example-memo
 -}
 main :: IO ()
 main = do
- arguments <- getArgs >>= \case
-  [s] -> return (s)
-  _ -> return ("")
- mainWith arguments
+ flag <- getArguments myCommand >>= \case
+  [Input s] -> return (s)
+  _       -> return ("")
+ mainWith flag
+
+type CommandDescription a = (String, OptionDescriptions a)
+type OptionDescriptions a = [OptDescr a]
+
+data Flag
+  = Input String
+  deriving (Show)
+    -- = Verbose  | Version 
+    --- | Input String | Output String | LibDir String
+
+myCommand :: CommandDescription Flag
+myCommand =
+  ( ""
+  , [
+    ]
+  )
+
+-- getOpt returns a triple consisting of the option arguments, a list of non-options, and a list of error messages.
+
+-- myOptions :: OptionDescriptions Flag
+-- myOptions =
+--   [
+--   ]
+
+getArguments
+  :: CommandDescription a
+  -> IO [a]
+--  -> IO ([a], [String])
+getArguments (name,options) = do
+  argv <- getArgs
+  let result = getOpt Permute options argv 
+  case result of
+   (o,_n,[]  ) -> return o -- (o,n)
+   (_,_,errs) -> failure errs
+  where
+  failure errors =
+    ioError (userError (concat errors ++ usageInfo header options))
+  header =
+    "Usage: "++ name ++" [...] ..."
+
+----------------------------------------
 
 increment :: Integer -> Integer
 increment = (+1) 
